@@ -1,0 +1,20 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>dev.vibestudio</groupId>
+    <artifactId>vibestudio-automator</artifactId>
+    <version>0.2.0</version>
+    <packaging>pom</packaging>
+    <repositories>
+        <repository><id>google</id><url>https://dl.google.com/dl/android/maven2/</url></repository>
+        <repository><id>central</id><url>https://repo.maven.apache.org/maven2/</url></repository>
+    </repositories>
+    <!-- Transitives are declared explicitly as aar. Only Shizuku; everything else is plain framework Java (no AndroidX). -->
+    <dependencies>
+        <dependency><groupId>dev.rikka.shizuku</groupId><artifactId>api</artifactId><version>13.1.5</version><type>aar</type><exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions></dependency>
+        <dependency><groupId>dev.rikka.shizuku</groupId><artifactId>provider</artifactId><version>13.1.5</version><type>aar</type><exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions></dependency>
+        <dependency><groupId>dev.rikka.shizuku</groupId><artifactId>aidl</artifactId><version>13.1.5</version><type>aar</type><exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions></dependency>
+        <dependency><groupId>dev.rikka.shizuku</groupId><artifactId>shared</artifactId><version>13.1.5</version><type>aar</type><exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions></dependency>
+    </dependencies>
+</project>
