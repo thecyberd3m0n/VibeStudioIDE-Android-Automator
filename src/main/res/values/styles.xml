@@ -7,4 +7,6 @@
         <item name="android:colorAccent">@color/accent</item>
         <item name="android:statusBarColor">@color/bg</item>
     </style>
+    <string name="app_name">VibeStudio Automator</string>
+    <string name="a11y_description">Lets the VibeStudio IDE inspect and control the screen for testing apps on this device.</string>
 </resources>
