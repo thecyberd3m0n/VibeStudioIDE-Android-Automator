@@ -169,7 +169,18 @@ public class AutomatorBoundService extends Service {
                 startActivity(i, o.toBundle()); return ok(true); }
 
             case "screenshot": case "capture_screenshot": { JSONObject o = new JSONObject(); o.put("jpegBase64", a11y().screenshot()); return o.toString(); }
-            case "logcat": return ShellDriver.run("logcat", "-d", "-t", String.valueOf(a.optInt("lines", 200)));
+            case "logcat": {
+java.util.List<String> c = new java.util.ArrayList<>(java.util.Arrays.asList("logcat", "-d", "-t", String.valueOf(a.optInt("lines", 200))));
+String pkg = a.optString("package", "");
+if (!pkg.isEmpty()) {
+if (!ScopeGuard.isAllowed(this, pkg)) throw new SecurityException("Package not in scope: " + pkg);
+String pid = ShellDriver.run("pidof", pkg).trim().split("\\s+")[0];
+if (pid.isEmpty()) throw new IllegalStateException("Process not running: " + pkg);
+c.add("--pid=" + pid);
+}
+String lvl = a.optString("level", "");
+if (lvl.matches("[VDIWEF]")) c.add("*:" + lvl);
+return ShellDriver.run(c.toArray(new String[0])); }
             case "force_stop": { String p = a.getString("package");
                 if (!ScopeGuard.isAllowed(this, p)) throw new SecurityException("Package not in scope: " + p);
                 if (ShellDriver.shizukuAvailable()) return ShellDriver.run("am", "force-stop", p);
