@@ -10,6 +10,29 @@ public class VibeAccessibilityService extends AccessibilityService {
     @Override public void onInterrupt() {}
     @Override public boolean onUnbind(android.content.Intent i) { instance = null; return super.onUnbind(i); }
 
+    /** Bounds of the window the agent controls: active allowed app window (fullscreen, split or floating); whole display in Full Device Mode; null if none. */
+    public Rect agentBounds() {
+        try {
+            Rect out = new Rect();
+            if (dev.vibestudio.automator.ipc.ScopeGuard.fullDevice(this) && dev.vibestudio.automator.driver.ShellDriver.shizukuAvailable()) {
+                android.graphics.Point p = new android.graphics.Point();
+                ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealSize(p);
+                return new Rect(0, 0, p.x, p.y);
+            }
+            List<AccessibilityWindowInfo> ws = getWindows(); AccessibilityWindowInfo best = null;
+            for (AccessibilityWindowInfo w : ws) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
+                CharSequence pkg = r.getPackageName(); boolean ok = pkg != null && dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString());
+                if (!ok) continue;
+                if (best == null || w.isActive() || (w.isFocused() && !best.isActive())) best = w;
+            }
+            if (best == null) return null;
+            best.getBoundsInScreen(out); return out;
+        } catch (Throwable t) { return null; }
+    }
+
+
     public synchronized String dumpTree(boolean compact) throws JSONException {
         nodes.clear();
         AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -73,13 +96,16 @@ public class VibeAccessibilityService extends AccessibilityService {
     public String screenshot() throws Exception {
         if (Build.VERSION.SDK_INT < 30) throw new UnsupportedOperationException("screenshot needs Android 11+");
         final CountDownLatch l = new CountDownLatch(1); final Bitmap[] bm = {null};
+        dev.vibestudio.automator.hud.AgentHudOverlay.setVisible(false);
+        try { Thread.sleep(120); } catch (InterruptedException ignored) {}
         takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
             @Override public void onSuccess(ScreenshotResult r) {
                 Bitmap hw = Bitmap.wrapHardwareBuffer(r.getHardwareBuffer(), r.getColorSpace());
                 bm[0] = hw.copy(Bitmap.Config.ARGB_8888, false); r.getHardwareBuffer().close(); l.countDown(); }
             @Override public void onFailure(int c) { l.countDown(); }
         });
-        l.await(5, TimeUnit.SECONDS);
+        try { l.await(5, TimeUnit.SECONDS); } finally { dev.vibestudio.automator.hud.AgentHudOverlay.setVisible(true); }
+
         if (bm[0] == null) throw new IllegalStateException("screenshot failed");
         return ScreenCompressor.toBase64(bm[0], 64 * 1024);
     }

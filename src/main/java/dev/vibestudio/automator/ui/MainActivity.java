@@ -12,7 +12,7 @@ public class MainActivity extends Activity {
         root.addView(btn("Accessibility settings", v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))));
         Switch full = new Switch(this); full.setText("Full Device Mode"); full.setTextColor(Color.WHITE); full.setChecked(ScopeGuard.fullDevice(this));
         full.setOnCheckedChangeListener((b, c) -> ScopeGuard.setFullDevice(this, c)); root.addView(full);
-        root.addView(btn("Test HUD", v -> { AgentHudOverlay.show(this); }));
+        root.addView(btn("Test HUD", v -> { AgentHudOverlay.show(this); v.postDelayed(AgentHudOverlay::hide, 3000); }));
         root.addView(btn("Test screenshot", v -> new Thread(() -> { String m; try { m = "OK " + VibeAccessibilityService.instance.screenshot().length() + " b64"; } catch (Throwable t) { m = "Fail: " + t; }
             final String mm = m; runOnUiThread(() -> Toast.makeText(this, mm, Toast.LENGTH_LONG).show()); }).start()));
         setContentView(root);

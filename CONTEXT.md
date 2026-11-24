@@ -52,3 +52,9 @@ Manifest, zasoby, `build.sh`, cały kod Javy poza `ipc/`, README, commit.
 3. `build.sh` na bazie IDE: bez libtermux i Kotlina; `aapt2`/`aapt` → `javac` (`-source 1.8`) → `d8` → podpis `debug.keystore` → `bin/VibeStudioAutomator.apk`. AAR-y Shizuku: wypakować `classes.jar`.
 4. Test: zainstalować, włączyć Accessibility, sprawdzić bind z `VibeStudio-Dev.apk` i narzędzia.
 5. Commit w nowym repo, README.
+
+## Aktualizacja (HUD / bubble / uprawnienia)
+- Zrobione: ramka RGB śledząca okno aplikacji (`hud/AgentHudOverlay`, `VibeAccessibilityService.agentBounds()`), bubble w stylu Messengera (`hud/BubbleController` + `ui/AgentBubbleActivity`, STOP -> `BubbleActionReceiver` -> `AutomatorBoundService.stopFromUser()`), uprawnienia on-demand (`driver/PermissionHelper`, Shizuku auto, inaczej ekran ustawień, max 1/30 s).
+- Test na `com.vibestudio.dev` przez Automatora (A11y, bez Shizuku): czat bez klucza pokazuje wpis Error "Gemini API Key is not configured" (bez crasha).
+- Znane problemy i dalsze zadania: `~/TASKS.md` (ramka pod status barem, trwałość ramki/bubble przez całą sesję agenta, wyjście do ustawień + poprawki system promptów, `tap_node` z liczbą zamiast "nN").
+- Kontynuować od `~/TASKS.md`.

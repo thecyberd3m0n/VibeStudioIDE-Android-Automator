@@ -29,7 +29,7 @@ public class AutomatorBoundService extends Service {
             CallerVerifier.check(AutomatorBoundService.this);
             ex.execute(() -> run(tool, args, cb));
         }
-        public void emergencyStop() { CallerVerifier.check(AutomatorBoundService.this); stopped = true; state = "stopped"; AgentHudOverlay.hide(); log("stop", "emergency stop"); }
+        public void emergencyStop() { CallerVerifier.check(AutomatorBoundService.this); doStop("emergency stop"); }
         public void pause() { CallerVerifier.check(AutomatorBoundService.this); paused = true; state = "paused"; }
         public void resume() { CallerVerifier.check(AutomatorBoundService.this); paused = false; stopped = false; state = "idle"; }
         public String getState() { CallerVerifier.check(AutomatorBoundService.this); return state; }
@@ -39,18 +39,40 @@ public class AutomatorBoundService extends Service {
     };
     @Override public IBinder onBind(Intent i) { return binder; }
 
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private static volatile AutomatorBoundService inst;
+    @Override public void onCreate() { super.onCreate(); inst = this; }
+    /** STOP from the bubble/HUD: returns false if the service is not running (caller just hides UI). */
+    public static boolean stopFromUser() { AutomatorBoundService s = inst; if (s == null) return false; s.doStop("stopped by user (bubble)"); return true; }
+    private void doStop(String why) { stopped = true; state = "stopped"; main.removeCallbacks(hideFrame); main.post(hideFrame); log("stop", why); }
+    private final Runnable hideFrame = () -> { AgentHudOverlay.hide(); dev.vibestudio.automator.hud.BubbleController.hide(this); };
+    private static String nodeId(Object o) { String s = String.valueOf(o).trim(); return s.matches("\\d+") ? "n" + s : s; }
+    private static boolean needsA11y(String tool) {
+        String t = tool.replaceFirst("^android_", "");
+        return !(t.equals("logcat") || t.equals("force_stop") || t.equals("shell_install") || t.equals("install_apk") || t.equals("launch_app"));
+    }
     private void run(String tool, String argsJson, IAutomatorCallback cb) {
         try {
+            String bare = tool.replaceFirst("^android_", "");
+            if (bare.equals("end_session")) { main.post(hideFrame); state = "idle"; cb.onSuccess(ok(true)); return; }
             if (stopped) { cb.onError(ERR_STOPPED, "Stopped by user"); return; }
             if (paused) { cb.onError(ERR_PAUSED, "Paused by user"); return; }
+            PermissionHelper.ensureNotifications(this);
+            if (needsA11y(tool) && !PermissionHelper.ensureAccessibility(this)) throw new IllegalStateException("PERMISSION_REQUIRED: Accessibility service not enabled - Settings was opened for the user. Finish the task now (task_complete) and ask the user to enable it manually.");
+            // frame + bubble stay up for the whole session; only end_session / STOP / client unbind hide them
+            main.post(() -> { AgentHudOverlay.show(this); dev.vibestudio.automator.hud.BubbleController.show(this); });
+
             state = "running:" + tool; log(tool, argsJson);
-            String res = dispatch(tool.replaceFirst("^android_", ""), new JSONObject(argsJson == null || argsJson.isEmpty() ? "{}" : argsJson));
+            String res = dispatch(bare, new JSONObject(argsJson == null || argsJson.isEmpty() ? "{}" : argsJson));
             state = "idle"; cb.onSuccess(res);
         } catch (Throwable t) {
             state = "idle"; log(tool, "error: " + t);
             try { cb.onError(ERR_GENERIC, String.valueOf(t.getMessage() != null ? t.getMessage() : t)); } catch (Throwable ignored) {}
         }
     }
+    @Override public boolean onUnbind(Intent i) { main.post(hideFrame); return super.onUnbind(i); }
+
+
     private VibeAccessibilityService a11y() {
         VibeAccessibilityService s = VibeAccessibilityService.instance;
         if (s == null) throw new IllegalStateException("Accessibility service not enabled");
@@ -85,12 +107,12 @@ public class AutomatorBoundService extends Service {
     private String dispatch(String t, JSONObject a) throws Exception {
         switch (t) {
             case "dump_ui_tree": return a11y().dumpTree(a.optBoolean("compact", true));
-            case "tap_node": return ok(a11y().tapNode(a.has("id") ? a.getString("id") : a.getString("nodeId")));
+            case "tap_node": return ok(a11y().tapNode(nodeId(a.has("id") ? a.get("id") : a.get("nodeId"))));
             case "tap": case "tap_coordinates": { double sf = a.optDouble("scaleFactor", 1.0);
                 float x = (float) (a.getDouble("x") * sf), y = (float) (a.getDouble("y") * sf); return ok(a11y().gesture(x, y, x, y, 50)); }
             case "swipe": { double sf = a.optDouble("scaleFactor", 1.0);
                 return ok(a11y().gesture((float)(a.getDouble("x1")*sf), (float)(a.getDouble("y1")*sf), (float)(a.getDouble("x2")*sf), (float)(a.getDouble("y2")*sf), a.optLong("durationMs", 300))); }
-            case "input_text": return ok(a11y().inputText(a.has("id") ? a.getString("id") : null, a.getString("text")));
+            case "input_text": return ok(a11y().inputText(a.has("id") ? nodeId(a.get("id")) : null, a.getString("text")));
             case "global_action": return ok(a11y().global(a.getString("action")));
             case "launch_app": { String p = a.getString("package");
                 if (!ScopeGuard.isAllowed(this, p)) throw new SecurityException("Package not in scope: " + p);
