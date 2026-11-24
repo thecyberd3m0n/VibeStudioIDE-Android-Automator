@@ -47,6 +47,17 @@ public final class BubbleOverlay {
             wm.addView(f, lp); root = f; // added after the frame => above it
         } catch (Throwable ignored) { root = null; }
     }); }
+    /** While the agent dispatches a gesture the bubble must not receive it: make the window untouchable, then restore. */
+    public static void setPassThrough(final boolean on) {
+        final java.util.concurrent.CountDownLatch l = new java.util.concurrent.CountDownLatch(1);
+        H.post(() -> {
+            try { if (root != null && lp != null) {
+                if (on) lp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE; else lp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                ((WindowManager) root.getContext().getSystemService(Context.WINDOW_SERVICE)).updateViewLayout(root, lp); }
+            } catch (Throwable ignored) {}
+            l.countDown(); });
+        try { l.await(500, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+    }
     public static void hide() { H.post(() -> {
         if (root == null) return;
         try { ((WindowManager) root.getContext().getSystemService(Context.WINDOW_SERVICE)).removeView(root); } catch (Throwable ignored) {}
