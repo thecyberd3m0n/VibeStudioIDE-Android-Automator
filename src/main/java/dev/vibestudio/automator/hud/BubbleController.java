@@ -9,6 +9,8 @@ public final class BubbleController {
     private BubbleController() {}
 
     public static void show(Context c) {
+        BubbleOverlay.show(c);
+        if (true) return; // system bubble replaced by BubbleOverlay (drawn above the HUD frame)
         try {
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
             if (Build.VERSION.SDK_INT >= 26) {
@@ -39,6 +41,7 @@ public final class BubbleController {
         } catch (Throwable ignored) {}
     }
     public static void hide(Context c) {
+        BubbleOverlay.hide();
         try { ((NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(ID); } catch (Throwable ignored) {}
     }
 }
