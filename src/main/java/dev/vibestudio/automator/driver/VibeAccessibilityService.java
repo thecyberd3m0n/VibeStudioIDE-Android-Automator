@@ -121,19 +121,36 @@ public class VibeAccessibilityService extends AccessibilityService {
         }
         return false;
     }
+    /** Window id of the agent's app window (never the Automator's own windows), or -1. */
+    private int agentWindowId() {
+        int id = -1; boolean act = false;
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
+                CharSequence pkg = r.getPackageName();
+                if (pkg == null || pkg.toString().equals(getPackageName())) continue;
+                if (!dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString())) continue;
+                if (id == -1 || (w.isActive() && !act)) { id = w.getId(); act = w.isActive(); }
+            }
+        } catch (Throwable t) {}
+        return id;
+    }
+    /** Screenshot of the agent's app window only (no HUD frame, no bubble). Android 14+ (takeScreenshotOfWindow, called via reflection). */
     public String screenshot() throws Exception {
-        if (Build.VERSION.SDK_INT < 30) throw new UnsupportedOperationException("screenshot needs Android 11+");
+        if (Build.VERSION.SDK_INT < 34) throw new UnsupportedOperationException("screenshot needs Android 14+");
+        int wid = agentWindowId();
+        if (wid == -1) throw new IllegalStateException("No allowed app window to capture");
         final CountDownLatch l = new CountDownLatch(1); final Bitmap[] bm = {null};
-        dev.vibestudio.automator.hud.AgentHudOverlay.setVisible(false);
-        try { Thread.sleep(120); } catch (InterruptedException ignored) {}
-        takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
+        TakeScreenshotCallback cb = new TakeScreenshotCallback() {
             @Override public void onSuccess(ScreenshotResult r) {
                 Bitmap hw = Bitmap.wrapHardwareBuffer(r.getHardwareBuffer(), r.getColorSpace());
                 bm[0] = hw.copy(Bitmap.Config.ARGB_8888, false); r.getHardwareBuffer().close(); l.countDown(); }
             @Override public void onFailure(int c) { l.countDown(); }
-        });
-        try { l.await(5, TimeUnit.SECONDS); } finally { dev.vibestudio.automator.hud.AgentHudOverlay.setVisible(true); }
-
+        };
+        AccessibilityService.class.getMethod("takeScreenshotOfWindow", int.class, java.util.concurrent.Executor.class, TakeScreenshotCallback.class)
+            .invoke(this, wid, getMainExecutor(), cb);
+        l.await(5, TimeUnit.SECONDS);
         if (bm[0] == null) throw new IllegalStateException("screenshot failed");
         return ScreenCompressor.toBase64(bm[0], 64 * 1024);
     }
