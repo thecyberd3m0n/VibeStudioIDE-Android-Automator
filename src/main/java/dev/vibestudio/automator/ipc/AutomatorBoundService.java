@@ -23,7 +23,7 @@ public class AutomatorBoundService extends Service {
                 o.put("accessibility", VibeAccessibilityService.instance != null);
                 o.put("shizuku", ShellDriver.shizukuAvailable());
                 o.put("fullDevice", ScopeGuard.fullDevice(AutomatorBoundService.this));
-                o.put("version", "0.2.1"); return o.toString(); } catch (JSONException e) { return "{}"; }
+                o.put("freeform", dev.vibestudio.automator.driver.FreeformStatus.isOn()); o.put("version", "0.2.1"); return o.toString(); } catch (JSONException e) { return "{}"; }
         }
         public void executeTool(final String tool, final String args, final IAutomatorCallback cb) {
             CallerVerifier.check(AutomatorBoundService.this);

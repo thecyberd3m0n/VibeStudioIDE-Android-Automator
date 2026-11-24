@@ -3,6 +3,7 @@ import android.app.Application;
 public class AutomatorApp extends Application {
     @Override public void onCreate() {
         super.onCreate();
+dev.vibestudio.automator.driver.FreeformStatus.check(this);
         final Thread.UncaughtExceptionHandler old = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             try {

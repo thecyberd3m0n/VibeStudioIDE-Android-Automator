@@ -28,5 +28,6 @@ public class MainActivity extends Activity {
         ScrollView sv = new ScrollView(this); sv.setBackgroundColor(0xFF121212); sv.addView(root); setContentView(sv);
     }
     @Override protected void onResume() { super.onResume();
-        status.setText("Accessibility: " + (VibeAccessibilityService.instance != null ? "ON" : "OFF") + "\nShizuku: " + (ShellDriver.shizukuAvailable() ? "ON" : "OFF")); }
+        status.setText("Accessibility: " + (VibeAccessibilityService.instance != null ? "ON" : "OFF") + "\nShizuku: " + (ShellDriver.shizukuAvailable() ? "ON" : "OFF")
+            + "\nFloating windows: " + (FreeformStatus.isOn() ? "ON" : "OFF") + "\n(" + FreeformStatus.detail() + ")"); }
 }
