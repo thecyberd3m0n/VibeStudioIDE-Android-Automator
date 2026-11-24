@@ -1,5 +1,6 @@
 package dev.vibestudio.automator.ipc;
-import android.app.Service; import android.content.*; import android.os.*;
+import android.app.PendingIntent; import android.app.Service; import android.content.*; import android.content.pm.PackageInstaller; import android.net.Uri; import android.os.*; import java.io.*;
+
 import dev.vibestudio.automator.driver.*; import dev.vibestudio.automator.hud.AgentHudOverlay;
 import org.json.*; import java.util.*; import java.util.concurrent.*;
 public class AutomatorBoundService extends Service {
@@ -55,6 +56,31 @@ public class AutomatorBoundService extends Service {
         if (s == null) throw new IllegalStateException("Accessibility service not enabled");
         return s;
     }
+    /** Non-Shizuku install: PackageInstaller session; the system confirm screen is opened and can be approved via the UI tools. */
+    private String install(String path) throws Exception {
+        final String action = "dev.vibestudio.automator.INSTALL_RESULT." + System.nanoTime();
+        final CountDownLatch done = new CountDownLatch(1); final String[] res = new String[1];
+        BroadcastReceiver rcv = new BroadcastReceiver() { @Override public void onReceive(Context c, Intent i) {
+            int st = i.getIntExtra(PackageInstaller.EXTRA_STATUS, -1);
+            if (st == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                Intent confirm = (Intent) i.getParcelableExtra(Intent.EXTRA_INTENT);
+                if (confirm != null) { confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(confirm); }
+                return; }
+            res[0] = "{\"ok\":" + (st == PackageInstaller.STATUS_SUCCESS) + ",\"status\":" + st + ",\"message\":" + JSONObject.quote(String.valueOf(i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))) + "}";
+            done.countDown(); } };
+        registerReceiver(rcv, new IntentFilter(action));
+        try {
+            PackageInstaller pi = getPackageManager().getPackageInstaller();
+            int id = pi.createSession(new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL));
+            PackageInstaller.Session s = pi.openSession(id);
+            try (InputStream in = new FileInputStream(path); OutputStream out = s.openWrite("base.apk", 0, new File(path).length())) {
+                byte[] buf = new byte[65536]; int n; while ((n = in.read(buf)) > 0) out.write(buf, 0, n); s.fsync(out); }
+            s.commit(PendingIntent.getBroadcast(this, id, new Intent(action).setPackage(getPackageName()), PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? 1 << 25 /* FLAG_MUTABLE */ : 0)).getIntentSender());
+            s.close();
+            if (!done.await(120, TimeUnit.SECONDS)) return "{\"ok\":false,\"message\":\"Timed out waiting for install confirmation (approve the system dialog)\"}";
+            return res[0];
+        } finally { unregisterReceiver(rcv); }
+    }
     private static String ok(boolean b) { return "{\"ok\":" + b + "}"; }
     private String dispatch(String t, JSONObject a) throws Exception {
         switch (t) {
@@ -74,8 +100,12 @@ public class AutomatorBoundService extends Service {
             case "logcat": return ShellDriver.run("logcat", "-d", "-t", String.valueOf(a.optInt("lines", 200)));
             case "force_stop": { String p = a.getString("package");
                 if (!ScopeGuard.isAllowed(this, p)) throw new SecurityException("Package not in scope: " + p);
-                return ShellDriver.run("am", "force-stop", p); }
-            case "shell_install": return ShellDriver.run("pm", "install", "-r", a.getString("path"));
+                if (ShellDriver.shizukuAvailable()) return ShellDriver.run("am", "force-stop", p);
+                ((android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(p);
+                return ok(true); }
+            case "install_apk": case "shell_install": { String path = a.getString("path");
+                if (!new File(path).canRead()) throw new IllegalArgumentException("APK not readable by Automator: " + path);
+                return ShellDriver.shizukuAvailable() ? ShellDriver.run("pm", "install", "-r", path) : install(path); }
             default: throw new IllegalArgumentException("Unknown tool: " + t);
         }
     }

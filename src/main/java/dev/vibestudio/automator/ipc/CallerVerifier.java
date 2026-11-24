@@ -4,7 +4,7 @@ import java.security.MessageDigest; import java.util.*;
 /** Allows only known IDE packages whose signing certificate SHA-256 is trusted (release + debug keys). */
 public final class CallerVerifier {
     public static final Set<String> IDE_PACKAGES = new HashSet<>(Arrays.asList(
-        "com.vibestudio.dev","com.vibestudio.app","com.vibestudio.app.debug","dev.vibestudio.ide","dev.vibestudio.ide.debug"));
+        "com.vibestudio.dev","com.vibestudio.app"));
     public static final Set<String> TRUSTED_CERTS = new HashSet<>(Arrays.asList(
         "8e7b9ac41d31427d9555550a447dcea65e755fbf2142f6ca322233a0d8ff7ab3",   // release IDE
         "990d5c69b5ce75454e9dc33e520f3d2f5fc0a687ea1c11a2d248f6fc0507b444")); // debug.keystore

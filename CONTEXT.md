@@ -4,7 +4,7 @@
 Odtworzyć źródła i zbudować nowego Automatora (`dev.vibestudio.automator`), opcjonalny moduł pomocniczy dla VibeStudio IDE. Stare źródła przepadły, zostały: spec `~/vsautomatorspecs.md` i stary APK `~/VibeStudioAutomator (3).apk` (v0.1, minSdk 26, targetSdk 28).
 
 ## Decyzje użytkownika
-1. `com.vibestudio.dev` (build z `build_dev.sh`) musi być domyślnie na liście dozwolonych pakietów Automatora, żeby IDE mogło kompilować wersje dev i testować je przez Automatora. Dopuszczone jako aliasy też: `com.vibestudio.app`, `com.vibestudio.app.debug`, `dev.vibestudio.ide`, `dev.vibestudio.ide.debug`.
+1. `com.vibestudio.dev` (build z `build_dev.sh`) musi być domyślnie na liście dozwolonych pakietów Automatora, żeby IDE mogło kompilować wersje dev i testować je przez Automatora. Dopuszczone jako aliasy też: `com.vibestudio.app`, `com.vibestudio.app.debug`, `com.vibestudio.app`, `com.vibestudio.dev`.
 2. Podpis: ten sam `debug.keystore` co IDE (skopiowany z `~/VibeStudioIDE/debug.keystore`). Uprawnienie `dev.vibestudio.permission.BIND_AUTOMATOR` ma `protectionLevel=signature`, więc klucz musi być wspólny.
 3. System budowania: fork `build.sh` z IDE (Termux: `aapt2`, `javac`, `d8`, `apksigner`, bez Gradle). Gradle/Compose tylko awaryjnie.
 4. **Język: Java, nie Kotlin** (spójność z IDE). UI na zwykłych Views, kolory VibeStudio: tło `#121212`, akcent `#1ECFBA`.
@@ -39,7 +39,7 @@ Manifest, zasoby, `build.sh`, cały kod Javy poza `ipc/`, README, commit.
 ## Manifest starego APK (do odtworzenia)
 - package `dev.vibestudio.automator`, versionName 0.1, minSdk 26, targetSdk 28, allowBackup=false
 - `<permission BIND_AUTOMATOR protectionLevel=signature>` + uses-permission tego samego, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`
-- `<queries>`: intent MAIN, pakiety IDE (`com.vibestudio.app`, `.debug`, dodać `com.vibestudio.dev`), `moe.shizuku.privileged.api`
+- `<queries>`: intent MAIN, pakiety IDE (`com.vibestudio.app`, `com.vibestudio.dev`), `moe.shizuku.privileged.api`
 - Application `.AutomatorApp`
 - Activities: `.CrashActivity` (`:crash_process`, nieeksportowana, excludeFromRecents), `.ui.MainActivity` (LAUNCHER), `.ui.AgentBubbleActivity` (taskAffinity="", allowEmbedded, documentLaunchMode=2, resizeable)
 - Services: `.driver.VibeAccessibilityService` (BIND_ACCESSIBILITY_SERVICE, `@xml/accessibility_config`: canRetrieveWindowContent, canPerformGestures, canTakeScreenshot, eventTypes 0x400020, flags 0x53, timeout 100), `.ipc.AutomatorBoundService` (permission BIND_AUTOMATOR, action ACTION_BIND)
