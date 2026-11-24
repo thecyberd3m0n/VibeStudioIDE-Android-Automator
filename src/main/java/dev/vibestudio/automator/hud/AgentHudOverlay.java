@@ -43,14 +43,10 @@ public final class AgentHudOverlay {
             if (b == null) return;
             getLocationOnScreen(loc);
             RectF t = new RectF(b.left - loc[0], b.top - loc[1], b.right - loc[0], b.bottom - loc[1]);
-            // keep the whole border visible: inset below status bar / cutout, above nav bar, off the side edges
+            // fit the border exactly inside the overlay view and the app window
             float d = getResources().getDisplayMetrics().density;
-            float sb = insetPx("status_bar_height", 24 * d), nb = insetPx("navigation_bar_height", 0);
-            WindowInsets wi = getRootWindowInsets();
-            if (wi != null) { sb = Math.max(sb, wi.getSystemWindowInsetTop()); nb = Math.max(nb, wi.getSystemWindowInsetBottom()); }
-            if (t.top < sb) t.top = sb + 2 * d;
-            if (getHeight() > 0 && t.bottom > getHeight() - nb) t.bottom = getHeight() - nb;
-            t.left += 2 * d; t.right -= 2 * d;
+            if (getWidth() > 0) { t.left = Math.max(t.left, 0) + 2 * d; t.right = Math.min(t.right, getWidth()) - 2 * d; }
+            if (getHeight() > 0) { t.top = Math.max(t.top, 0) + 2 * d; t.bottom = Math.min(t.bottom, getHeight()) - 2 * d; }
 
             if (t.equals(to)) return;
             to.set(t);

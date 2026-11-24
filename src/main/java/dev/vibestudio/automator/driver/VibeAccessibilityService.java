@@ -36,7 +36,7 @@ public class VibeAccessibilityService extends AccessibilityService {
                 if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
                 CharSequence pkg = r.getPackageName(); boolean ok = pkg != null && dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString());
-                if (!ok) continue;
+                if (!ok || pkg.toString().equals(getPackageName())) continue;
                 if (best == null || w.isActive() || (w.isFocused() && !best.isActive())) best = w;
             }
             if (best == null) return null;
@@ -45,9 +45,25 @@ public class VibeAccessibilityService extends AccessibilityService {
     }
 
 
+    /** Root of the agent's app window, never the Automator's own windows (bubble). */
+    private AccessibilityNodeInfo agentRoot() {
+        AccessibilityNodeInfo best = null; boolean bestActive = false;
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
+                CharSequence pkg = r.getPackageName();
+                if (pkg == null || pkg.toString().equals(getPackageName())) continue;
+                if (best == null || (w.isActive() && !bestActive)) { best = r; bestActive = w.isActive(); }
+            }
+        } catch (Throwable t) {}
+        if (best != null) return best;
+        AccessibilityNodeInfo r = getRootInActiveWindow();
+        return r != null && !getPackageName().contentEquals(String.valueOf(r.getPackageName())) ? r : null;
+    }
     public synchronized String dumpTree(boolean compact) throws JSONException {
         nodes.clear();
-        AccessibilityNodeInfo root = getRootInActiveWindow();
+        AccessibilityNodeInfo root = agentRoot();
         if (root == null) throw new IllegalStateException("No active window");
         JSONObject o = walk(root, compact, new int[]{0});
         return o.toString();
