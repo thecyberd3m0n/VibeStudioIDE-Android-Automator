@@ -23,12 +23,31 @@ public class AutomatorBoundService extends Service {
                 o.put("accessibility", VibeAccessibilityService.instance != null);
                 o.put("shizuku", ShellDriver.shizukuAvailable());
                 o.put("fullDevice", ScopeGuard.fullDevice(AutomatorBoundService.this));
-                o.put("version", "0.2"); return o.toString(); } catch (JSONException e) { return "{}"; }
+                o.put("version", "0.2.1"); return o.toString(); } catch (JSONException e) { return "{}"; }
         }
         public void executeTool(final String tool, final String args, final IAutomatorCallback cb) {
             CallerVerifier.check(AutomatorBoundService.this);
             ex.execute(() -> run(tool, args, cb));
         }
+
+        public void installApk(final android.os.ParcelFileDescriptor apk, final long size, final IAutomatorCallback cb) {
+            CallerVerifier.check(AutomatorBoundService.this);
+            ex.execute(() -> {
+                try {
+                    if (stopped) { cb.onError(ERR_STOPPED, "Stopped by user"); return; }
+                    if (paused) { cb.onError(ERR_PAUSED, "Paused by user"); return; }
+                    PermissionHelper.ensureNotifications(AutomatorBoundService.this);
+                    main.post(() -> { AgentHudOverlay.show(AutomatorBoundService.this); dev.vibestudio.automator.hud.BubbleController.show(AutomatorBoundService.this); });
+                    state = "running:install_apk"; log("install_apk", "fd size=" + size);
+                    String res = install(new android.os.ParcelFileDescriptor.AutoCloseInputStream(apk), size);
+                    state = "idle"; cb.onSuccess(res);
+                } catch (Throwable t) {
+                    state = "idle"; log("install_apk", "error: " + t);
+                    try { cb.onError(ERR_GENERIC, String.valueOf(t.getMessage() != null ? t.getMessage() : t)); } catch (Throwable ignored) {}
+                }
+            });
+        }
+
         public void emergencyStop() { CallerVerifier.check(AutomatorBoundService.this); doStop("emergency stop"); }
         public void pause() { CallerVerifier.check(AutomatorBoundService.this); paused = true; state = "paused"; }
         public void resume() { CallerVerifier.check(AutomatorBoundService.this); paused = false; stopped = false; state = "idle"; }
@@ -78,8 +97,8 @@ public class AutomatorBoundService extends Service {
         if (s == null) throw new IllegalStateException("Accessibility service not enabled");
         return s;
     }
-    /** Non-Shizuku install: PackageInstaller session; the system confirm screen is opened and can be approved via the UI tools. */
-    private String install(String path) throws Exception {
+    /** PackageInstaller session fed from a stream (APK handed over via Binder fd, no shared path needed). The system confirm dialog is opened and its button is clicked via Accessibility when available. */
+    private String install(InputStream apk, long size) throws Exception {
         final String action = "dev.vibestudio.automator.INSTALL_RESULT." + System.nanoTime();
         final CountDownLatch done = new CountDownLatch(1); final String[] res = new String[1];
         BroadcastReceiver rcv = new BroadcastReceiver() { @Override public void onReceive(Context c, Intent i) {
@@ -87,6 +106,10 @@ public class AutomatorBoundService extends Service {
             if (st == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                 Intent confirm = (Intent) i.getParcelableExtra(Intent.EXTRA_INTENT);
                 if (confirm != null) { confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(confirm); }
+                new Thread(() -> { for (int k = 0; k < 60 && done.getCount() > 0; k++) {
+                    try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                    VibeAccessibilityService a = VibeAccessibilityService.instance;
+                    if (a != null && a.clickInstallConfirm()) return; } }).start();
                 return; }
             res[0] = "{\"ok\":" + (st == PackageInstaller.STATUS_SUCCESS) + ",\"status\":" + st + ",\"message\":" + JSONObject.quote(String.valueOf(i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))) + "}";
             done.countDown(); } };
@@ -95,7 +118,7 @@ public class AutomatorBoundService extends Service {
             PackageInstaller pi = getPackageManager().getPackageInstaller();
             int id = pi.createSession(new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL));
             PackageInstaller.Session s = pi.openSession(id);
-            try (InputStream in = new FileInputStream(path); OutputStream out = s.openWrite("base.apk", 0, new File(path).length())) {
+            try (InputStream in = apk; OutputStream out = s.openWrite("base.apk", 0, size > 0 ? size : -1)) {
                 byte[] buf = new byte[65536]; int n; while ((n = in.read(buf)) > 0) out.write(buf, 0, n); s.fsync(out); }
             s.commit(PendingIntent.getBroadcast(this, id, new Intent(action).setPackage(getPackageName()), PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? 1 << 25 /* FLAG_MUTABLE */ : 0)).getIntentSender());
             s.close();
@@ -103,6 +126,7 @@ public class AutomatorBoundService extends Service {
             return res[0];
         } finally { unregisterReceiver(rcv); }
     }
+
     private static String ok(boolean b) { return "{\"ok\":" + b + "}"; }
     private String dispatch(String t, JSONObject a) throws Exception {
         switch (t) {
@@ -125,9 +149,7 @@ public class AutomatorBoundService extends Service {
                 if (ShellDriver.shizukuAvailable()) return ShellDriver.run("am", "force-stop", p);
                 ((android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(p);
                 return ok(true); }
-            case "install_apk": case "shell_install": { String path = a.getString("path");
-                if (!new File(path).canRead()) throw new IllegalArgumentException("APK not readable by Automator: " + path);
-                return ShellDriver.shizukuAvailable() ? ShellDriver.run("pm", "install", "-r", path) : install(path); }
+
             default: throw new IllegalArgumentException("Unknown tool: " + t);
         }
     }

@@ -10,10 +10,10 @@ MAN=src/main/AndroidManifest.xml
 if aapt2 version >/dev/null 2>&1; then
   mkdir -p build/compiled
   aapt2 compile --dir src/main/res -o build/compiled/
-  aapt2 link -o bin/app.unsigned.apk -I libs/android.jar --manifest $MAN --min-sdk-version 26 --target-sdk-version 28 --version-code 2 --version-name 0.2 --java gen_r --auto-add-overlay build/compiled/*.flat
+  aapt2 link -o bin/app.unsigned.apk -I libs/android.jar --manifest $MAN --min-sdk-version 26 --target-sdk-version 28 --version-code 3 --version-name 0.2.1 --java gen_r --auto-add-overlay build/compiled/*.flat
 else
   echo "aapt2 unusable, using aapt"
-  aapt package -f -m -J gen_r -M $MAN -I libs/android.jar -S src/main/res -F bin/app.unsigned.apk --min-sdk-version 26 --target-sdk-version 28 --version-code 2 --version-name 0.2 --auto-add-overlay
+  aapt package -f -m -J gen_r -M $MAN -I libs/android.jar -S src/main/res -F bin/app.unsigned.apk --min-sdk-version 26 --target-sdk-version 28 --version-code 3 --version-name 0.2.1 --auto-add-overlay
 fi
 javac -source 1.8 -target 1.8 -nowarn -cp "$CP" -d obj $(find src/main/java gen_r -name '*.java')
 (cd obj && jar cf ../bin/classes.jar .)

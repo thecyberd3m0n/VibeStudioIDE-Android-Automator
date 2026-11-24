@@ -9,6 +9,18 @@ public class VibeAccessibilityService extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {}
     @Override public void onInterrupt() {}
     @Override public boolean onUnbind(android.content.Intent i) { instance = null; return super.onUnbind(i); }
+    /** Clicks the confirm button of the system package installer dialog; false if it is not on screen. */
+    public boolean clickInstallConfirm() {
+        android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        String pkg = String.valueOf(root.getPackageName());
+        if (!pkg.contains("packageinstaller") && !pkg.contains("permissioncontroller")) return false;
+        for (String label : new String[]{"Install", "Update", "Zainstaluj", "Aktualizuj", "Install anyway", "Zainstaluj mimo to"})
+            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText(label))
+                if (n.isClickable() && n.isEnabled() && n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return true;
+        return false;
+    }
+
 
     /** Bounds of the window the agent controls: active allowed app window (fullscreen, split or floating); whole display in Full Device Mode; null if none. */
     public Rect agentBounds() {
