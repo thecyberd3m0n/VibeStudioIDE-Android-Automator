@@ -58,3 +58,23 @@ Manifest, zasoby, `build.sh`, cały kod Javy poza `ipc/`, README, commit.
 - Test na `com.vibestudio.dev` przez Automatora (A11y, bez Shizuku): czat bez klucza pokazuje wpis Error "Gemini API Key is not configured" (bez crasha).
 - Znane problemy i dalsze zadania: `~/TASKS.md` (ramka pod status barem, trwałość ramki/bubble przez całą sesję agenta, wyjście do ustawień + poprawki system promptów, `tap_node` z liczbą zamiast "nN").
 - Kontynuować od `~/TASKS.md`.
+
+## Aktualizacja: UX ramki i dymka (do zrobienia, kod jeszcze nie ruszony)
+Zgłoszenie usera (zrzut z LinkedIna):
+- Ramka RGB się nie rozciąga: widać ją tylko na części ekranu (u góry obcięta, z prawej/dołu nie dochodzi do krawędzi okna aplikacji).
+- Dymek (bubble) jest pod ramką i agent przypadkiem w niego klikał (tap w prawym górnym rogu otworzył panel "VibeStudio Agent" z STOP).
+- Wymagania: dymek jest TYLKO dla usera, nie może zasłaniać contentu ani być otwierany przez agenta. Jego otwarcie nie może zakłócać pracy agenta, który ma widzieć nieprzesłoniętą zawartość aplikacji (dump_ui_tree / screenshot).
+
+Ustalenia z kodu (src/main/java/dev/vibestudio/automator):
+- hud/AgentHudOverlay.java: FrameView w oknie TYPE_ACCESSIBILITY_OVERLAY (NOT_TOUCHABLE), cel z VibeAccessibilityService.agentBounds(), animacja 220 ms, TRACK co 300 ms. setTarget() przycina top do status bara i bottom do nav bara, odejmuje 2dp z lewej/prawej. Podejrzenie przyczyny "nie rozciąga się": rozbieżność układu współrzędnych okna (LAYOUT_NO_LIMITS + getLocationOnScreen) vs bounds okna / insety. Do sprawdzenia na urządzeniu.
+- hud/BubbleController.java: bubble systemowy (Notification.BubbleMetadata, setDesiredHeight(360), setSuppressNotification(true)), hostuje ui/AgentBubbleActivity (placeholder + STOP). Bubble to osobne okno aplikacji nad innymi, więc zasłania content i leży w obszarze, który agent może tapnąć.
+- driver/VibeAccessibilityService: tap/swipe idą przez gesture() (współrzędne ekranu, nie wiedzą o dymku), dump_ui_tree używa getRootInActiveWindow(), agentBounds() wybiera okno TYPE_APPLICATION z allowlisty.
+- ipc/AutomatorBoundService: show() HUD + bubble przy każdym wywołaniu narzędzia; hide przy end_session/STOP/unbind.
+- ScopeGuard: SYSTEM zawiera "dev.vibestudio.automator", czyli okno dymku jest dla agenta "dozwolone" (agentBounds/dump mogą je wybrać, tap_node/tap w nie działa).
+
+Plan naprawy:
+1. Wykluczyć okna własnego pakietu (dymek) z agentBounds() i z zakresu agenta: dump_ui_tree/tap_node/tap/screenshot nie mogą trafiać w okno dev.vibestudio.automator (tap w obszarze dymka = odrzucony lub przepuszczony pod spód, zależnie od decyzji).
+2. Dymek: nie otwierać go z agenta; po otwarciu nie zmieniać aktywnego okna agenta (agent ma dalej widzieć app: dump przez getWindows() po pakiecie z allowlisty, nie getRootInActiveWindow()); rozważyć przeniesienie dymka poza obszar contentu zamiast nakładki na ramkę.
+3. Naprawić geometrię ramki (rozciąganie na całe okno aplikacji, zgodnie z agentBounds + insety) i z-order względem dymka.
+4. Przebudować (./build.sh) i przetestować na urządzeniu na LinkedInie; instalacja przez android_install_apk wcześniej timeoutowała (może wymagać ręcznego potwierdzenia).
+Powiązane: ~/TASKS.md. Poprzedni build 0.2.1 jest w bin/VibeStudioAutomator.apk, a niewypchnięte commity lokalne to 7aaf4d8 i 4aa2966.
