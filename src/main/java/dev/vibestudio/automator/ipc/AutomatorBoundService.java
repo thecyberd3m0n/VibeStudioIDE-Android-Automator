@@ -133,15 +133,41 @@ public class AutomatorBoundService extends Service {
             case "dump_ui_tree": return a11y().dumpTree(a.optBoolean("compact", true));
             case "tap_node": return ok(a11y().tapNode(nodeId(a.has("id") ? a.get("id") : a.get("nodeId"))));
             case "tap": case "tap_coordinates": { double sf = a.optDouble("scaleFactor", 1.0);
-                float x = (float) (a.getDouble("x") * sf), y = (float) (a.getDouble("y") * sf); return ok(a11y().gesture(x, y, x, y, 50)); }
+                float x = (float) (a.getDouble("x") * sf), y = (float) (a.getDouble("y") * sf); return ok(a11y().windowGesture(x, y, x, y, 50)); }
             case "swipe": { double sf = a.optDouble("scaleFactor", 1.0);
-                return ok(a11y().gesture((float)(a.getDouble("x1")*sf), (float)(a.getDouble("y1")*sf), (float)(a.getDouble("x2")*sf), (float)(a.getDouble("y2")*sf), a.optLong("durationMs", 300))); }
+                return ok(a11y().windowGesture((float)(a.getDouble("x1")*sf), (float)(a.getDouble("y1")*sf), (float)(a.getDouble("x2")*sf), (float)(a.getDouble("y2")*sf), a.optLong("durationMs", 300))); }
             case "input_text": return ok(a11y().inputText(a.has("id") ? nodeId(a.get("id")) : null, a.getString("text")));
             case "global_action": return ok(a11y().global(a.getString("action")));
             case "launch_app": { String p = a.getString("package");
                 if (!ScopeGuard.isAllowed(this, p)) throw new SecurityException("Package not in scope: " + p);
                 Intent i = getPackageManager().getLaunchIntentForPackage(p); if (i == null) throw new IllegalArgumentException("No launcher for " + p);
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i); return ok(true); }
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                String q = a.optString("quarter", "");
+                if (q.isEmpty()) { startActivity(i); return ok(true); }
+                android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                int w = dm.widthPixels, h = dm.heightPixels, hw = w / 2, hh = h / 2;
+                android.graphics.Rect r;
+                switch (q) {
+                    case "top_left": r = new android.graphics.Rect(0, 0, hw, hh); break;
+                    case "top_right": r = new android.graphics.Rect(hw, 0, w, hh); break;
+                    case "bottom_left": r = new android.graphics.Rect(0, hh, hw, h); break;
+                    case "bottom_right": r = new android.graphics.Rect(hw, hh, w, h); break;
+                    default: throw new IllegalArgumentException("Bad quarter: " + q);
+                }
+                android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+                o.setLaunchBounds(r);
+                // setLaunchWindowingMode is a hidden API: use meta-reflection to bypass hidden-API restrictions (no Shizuku).
+                String modeErr = null;
+                try {
+                    java.lang.reflect.Method getDecl = Class.class.getDeclaredMethod("getDeclaredMethod", String.class, Class[].class);
+                    java.lang.reflect.Method m = (java.lang.reflect.Method) getDecl.invoke(android.app.ActivityOptions.class, "setLaunchWindowingMode", new Class[]{int.class});
+                    m.setAccessible(true);
+                    m.invoke(o, 5); // WINDOWING_MODE_FREEFORM
+                } catch (Throwable ex2) { modeErr = String.valueOf(ex2.getCause() != null ? ex2.getCause() : ex2); }
+
+                if (modeErr != null) throw new IllegalStateException("Cannot set freeform windowing mode: " + modeErr);
+                startActivity(i, o.toBundle()); return ok(true); }
+
             case "screenshot": case "capture_screenshot": { JSONObject o = new JSONObject(); o.put("jpegBase64", a11y().screenshot()); return o.toString(); }
             case "logcat": return ShellDriver.run("logcat", "-d", "-t", String.valueOf(a.optInt("lines", 200)));
             case "force_stop": { String p = a.getString("package");

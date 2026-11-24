@@ -22,50 +22,46 @@ public class VibeAccessibilityService extends AccessibilityService {
     }
 
 
-    /** Bounds of the window the agent controls: active allowed app window (fullscreen, split or floating); whole display in Full Device Mode; null if none. */
-    public Rect agentBounds() {
-        try {
-            Rect out = new Rect();
-            if (dev.vibestudio.automator.ipc.ScopeGuard.fullDevice(this) && dev.vibestudio.automator.driver.ShellDriver.shizukuAvailable()) {
-                android.graphics.Point p = new android.graphics.Point();
-                ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealSize(p);
-                return new Rect(0, 0, p.x, p.y);
-            }
-            List<AccessibilityWindowInfo> ws = getWindows(); AccessibilityWindowInfo best = null;
-            for (AccessibilityWindowInfo w : ws) {
-                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
-                AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
-                CharSequence pkg = r.getPackageName(); boolean ok = pkg != null && dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString());
-                if (!ok || pkg.toString().equals(getPackageName())) continue;
-                if (best == null || w.isActive() || (w.isFocused() && !best.isActive())) best = w;
-            }
-            if (best == null) return null;
-            best.getBoundsInScreen(out); return out;
-        } catch (Throwable t) { return null; }
-    }
-
-
-    /** Root of the agent's app window, never the Automator's own windows (bubble). */
-    private AccessibilityNodeInfo agentRoot() {
-        AccessibilityNodeInfo best = null; boolean bestActive = false;
+    /** The one window the agent controls (bounds, UI tree and screenshot all use it): an allowed app window, never the Automator's own; the active one wins, else the focused one. */
+    private AccessibilityWindowInfo agentWindow() {
+        AccessibilityWindowInfo best = null;
         try {
             for (AccessibilityWindowInfo w : getWindows()) {
                 if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
                 CharSequence pkg = r.getPackageName();
-                if (pkg == null || pkg.toString().equals(getPackageName())) continue;
-                if (best == null || (w.isActive() && !bestActive)) { best = r; bestActive = w.isActive(); }
+                if (pkg == null || pkg.toString().equals(getPackageName()) || !dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString())) continue;
+                if (best == null || w.isActive() || (w.isFocused() && !best.isActive())) best = w;
             }
         } catch (Throwable t) {}
-        if (best != null) return best;
-        AccessibilityNodeInfo r = getRootInActiveWindow();
+        return best;
+    }
+
+    /** Bounds of the window the agent controls; whole display in Full Device Mode; null if none. */
+    public Rect agentBounds() {
+        try {
+            if (dev.vibestudio.automator.ipc.ScopeGuard.fullDevice(this) && dev.vibestudio.automator.driver.ShellDriver.shizukuAvailable()) {
+                android.graphics.Point p = new android.graphics.Point();
+                ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealSize(p);
+                return new Rect(0, 0, p.x, p.y);
+            }
+            AccessibilityWindowInfo w = agentWindow(); if (w == null) return null;
+            Rect out = new Rect(); w.getBoundsInScreen(out); return out;
+        } catch (Throwable t) { return null; }
+    }
+
+    private AccessibilityNodeInfo agentRoot() {
+        AccessibilityWindowInfo w = agentWindow(); AccessibilityNodeInfo r = w != null ? w.getRoot() : null;
+        if (r != null) return r;
+        r = getRootInActiveWindow();
         return r != null && !getPackageName().contentEquals(String.valueOf(r.getPackageName())) ? r : null;
     }
+
     public synchronized String dumpTree(boolean compact) throws JSONException {
         nodes.clear();
         AccessibilityNodeInfo root = agentRoot();
         if (root == null) throw new IllegalStateException("No active window");
-        JSONObject o = walk(root, compact, new int[]{0});
+        Rect wb = agentBounds(); JSONObject o = walk(root, compact, new int[]{0, wb == null ? 0 : wb.left, wb == null ? 0 : wb.top});
         return o.toString();
     }
     private JSONObject walk(AccessibilityNodeInfo n, boolean compact, int[] ctr) throws JSONException {
@@ -76,7 +72,7 @@ public class VibeAccessibilityService extends AccessibilityService {
         if (n.getContentDescription() != null) o.put("desc", n.getContentDescription().toString());
         if (n.getViewIdResourceName() != null) o.put("res", n.getViewIdResourceName());
         if (n.getPackageName() != null) o.put("pkg", n.getPackageName().toString());
-        Rect r = new Rect(); n.getBoundsInScreen(r); o.put("bounds", r.flattenToString());
+        Rect r = new Rect(); n.getBoundsInScreen(r); r.offset(-ctr[1], -ctr[2]); o.put("bounds", r.flattenToString());
         if (n.isClickable()) o.put("clickable", true);
         if (n.isEditable()) o.put("editable", true);
         JSONArray ch = new JSONArray();
@@ -86,7 +82,9 @@ public class VibeAccessibilityService extends AccessibilityService {
             ch.put(walk(c, compact, ctr));
         }
         if (ch.length() > 0) o.put("children", ch);
-        return o;
+        boolean bare = !o.has("text") && !o.has("desc") && !o.has("res") && !o.has("clickable") && !o.has("editable");
+        return compact && bare && ch.length() == 1 ? ch.getJSONObject(0) : o; // compact: drop empty single-child wrappers
+
     }
     public synchronized boolean tapNode(String id) {
         AccessibilityNodeInfo n = nodes.get(id); if (n == null) return false;
@@ -99,6 +97,11 @@ public class VibeAccessibilityService extends AccessibilityService {
         if (n == null) return false;
         Bundle b = new Bundle(); b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b);
+    }
+    /** Gesture in window coordinates (same as screenshot and UI-tree bounds): the window origin is added here. */
+    public boolean windowGesture(float x1, float y1, float x2, float y2, long dur) {
+        Rect b = agentBounds(); float ox = b == null ? 0 : b.left, oy = b == null ? 0 : b.top;
+        return gesture(x1 + ox, y1 + oy, x2 + ox, y2 + oy, dur);
     }
     public boolean gesture(float x1, float y1, float x2, float y2, long dur) {
         dev.vibestudio.automator.hud.BubbleOverlay.setPassThrough(true);
@@ -125,25 +128,11 @@ public class VibeAccessibilityService extends AccessibilityService {
         }
         return false;
     }
-    /** Window id of the agent's app window (never the Automator's own windows), or -1. */
-    private int agentWindowId() {
-        int id = -1; boolean act = false;
-        try {
-            for (AccessibilityWindowInfo w : getWindows()) {
-                if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
-                AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
-                CharSequence pkg = r.getPackageName();
-                if (pkg == null || pkg.toString().equals(getPackageName())) continue;
-                if (!dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString())) continue;
-                if (id == -1 || (w.isActive() && !act)) { id = w.getId(); act = w.isActive(); }
-            }
-        } catch (Throwable t) {}
-        return id;
-    }
+    /** Screenshot of the agent's app window only (no HUD frame, no bubble). Android 14+ (takeScreenshotOfWindow, called via reflection). */
     /** Screenshot of the agent's app window only (no HUD frame, no bubble). Android 14+ (takeScreenshotOfWindow, called via reflection). */
     public String screenshot() throws Exception {
         if (Build.VERSION.SDK_INT < 34) throw new UnsupportedOperationException("screenshot needs Android 14+");
-        int wid = agentWindowId();
+        AccessibilityWindowInfo aw = agentWindow(); int wid = aw == null ? -1 : aw.getId();
         if (wid == -1) throw new IllegalStateException("No allowed app window to capture");
         final CountDownLatch l = new CountDownLatch(1); final Bitmap[] bm = {null};
         TakeScreenshotCallback cb = new TakeScreenshotCallback() {

@@ -45,8 +45,8 @@ public final class AgentHudOverlay {
             RectF t = new RectF(b.left - loc[0], b.top - loc[1], b.right - loc[0], b.bottom - loc[1]);
             // fit the border exactly inside the overlay view and the app window
             float d = getResources().getDisplayMetrics().density;
-            if (getWidth() > 0) { t.left = Math.max(t.left, 0) + 2 * d; t.right = Math.min(t.right, getWidth()) - 2 * d; }
-            if (getHeight() > 0) { t.top = Math.max(t.top, 0) + 2 * d; t.bottom = Math.min(t.bottom, getHeight()) - 2 * d; }
+            if (getWidth() > 0) { t.left = Math.max(t.left, 0); t.right = Math.min(t.right, getWidth()); }
+            if (getHeight() > 0) { t.top = Math.max(t.top, 0); t.bottom = Math.min(t.bottom, getHeight()); }
 
             if (t.equals(to)) return;
             to.set(t);
@@ -66,7 +66,7 @@ public final class AgentHudOverlay {
             if (grad == null) { grad = new SweepGradient(0, 0, COLORS, null); stroke.setShader(grad); glow.setShader(grad); }
             m.setRotate(angle, 0, 0); m.postTranslate(cur.centerX(), cur.centerY()); grad.setLocalMatrix(m);
             float rad = Math.min(radius, Math.min(cur.width(), cur.height()) / 4f);
-            r.set(cur.left + w * 1.5f, cur.top + w * 1.5f, cur.right - w * 1.5f, cur.bottom - w * 1.5f);
+            r.set(cur.left + w * 0.5f, cur.top + w * 0.5f, cur.right - w * 0.5f, cur.bottom - w * 0.5f);
             cv.drawRoundRect(r, rad, rad, glow); cv.drawRoundRect(r, rad, rad, stroke);
         }
     }
