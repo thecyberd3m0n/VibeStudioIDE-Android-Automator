@@ -66,6 +66,9 @@ public class AutomatorBoundService extends Service {
     private void doStop(String why) { stopped = true; state = "stopped"; main.removeCallbacks(hideFrame); main.post(hideFrame); log("stop", why); }
     private final Runnable hideFrame = () -> { AgentHudOverlay.hide(); dev.vibestudio.automator.hud.BubbleController.hide(this); };
     private static String nodeId(Object o) { String s = String.valueOf(o).trim(); return s.matches("\\d+") ? "n" + s : s; }
+    private static boolean needsSession(String t) {
+        return t.equals("dump_ui_tree") || t.equals("tap_node") || t.equals("tap") || t.equals("tap_coordinates") || t.equals("swipe") || t.equals("input_text") || t.equals("screenshot") || t.equals("capture_screenshot");
+    }
     private static boolean needsA11y(String tool) {
         String t = tool.replaceFirst("^android_", "");
         return !(t.equals("logcat") || t.equals("force_stop") || t.equals("shell_install") || t.equals("install_apk") || t.equals("launch_app"));
@@ -73,7 +76,7 @@ public class AutomatorBoundService extends Service {
     private void run(String tool, String argsJson, IAutomatorCallback cb) {
         try {
             String bare = tool.replaceFirst("^android_", "");
-            if (bare.equals("end_session")) { main.post(hideFrame); state = "idle"; cb.onSuccess(ok(true)); return; }
+            if (bare.equals("end_session")) { AgentSession.end(); main.post(hideFrame); state = "idle"; cb.onSuccess(ok(true)); return; }
             if (stopped) { cb.onError(ERR_STOPPED, "Stopped by user"); return; }
             if (paused) { cb.onError(ERR_PAUSED, "Paused by user"); return; }
             PermissionHelper.ensureNotifications(this);
@@ -81,6 +84,7 @@ public class AutomatorBoundService extends Service {
             // frame + bubble stay up for the whole session; only end_session / STOP / client unbind hide them
             main.post(() -> { AgentHudOverlay.show(this); dev.vibestudio.automator.hud.BubbleController.show(this); });
 
+            if (needsSession(bare) && !AgentSession.isActive()) throw new IllegalStateException("NO_SESSION: call android_begin_session {package} (or android_begin_full_device_session) first");
             state = "running:" + tool; log(tool, argsJson);
             String res = dispatch(bare, new JSONObject(argsJson == null || argsJson.isEmpty() ? "{}" : argsJson));
             state = "idle"; cb.onSuccess(res);
@@ -106,14 +110,11 @@ public class AutomatorBoundService extends Service {
             if (st == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                 Intent confirm = (Intent) i.getParcelableExtra(Intent.EXTRA_INTENT);
                 if (confirm != null) { confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); c.startActivity(confirm); }
-                new Thread(() -> { for (int k = 0; k < 60 && done.getCount() > 0; k++) {
-                    try { Thread.sleep(500); } catch (InterruptedException e) { return; }
-                    VibeAccessibilityService a = VibeAccessibilityService.instance;
-                    if (a != null && a.clickInstallConfirm()) return; } }).start();
                 return; }
             res[0] = "{\"ok\":" + (st == PackageInstaller.STATUS_SUCCESS) + ",\"status\":" + st + ",\"message\":" + JSONObject.quote(String.valueOf(i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))) + "}";
             done.countDown(); } };
         registerReceiver(rcv, new IntentFilter(action));
+        AgentSession.setInstalling(true); AgentHudOverlay.setVisible(false); state = "awaiting_user_install"; // frame hidden, screen unreadable, agent loop blocked on this call
         try {
             PackageInstaller pi = getPackageManager().getPackageInstaller();
             int id = pi.createSession(new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL));
@@ -122,24 +123,45 @@ public class AutomatorBoundService extends Service {
                 byte[] buf = new byte[65536]; int n; while ((n = in.read(buf)) > 0) out.write(buf, 0, n); s.fsync(out); }
             s.commit(PendingIntent.getBroadcast(this, id, new Intent(action).setPackage(getPackageName()), PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? 1 << 25 /* FLAG_MUTABLE */ : 0)).getIntentSender());
             s.close();
-            if (!done.await(120, TimeUnit.SECONDS)) return "{\"ok\":false,\"message\":\"Timed out waiting for install confirmation (approve the system dialog)\"}";
+            // Agent loop is paused here with NO timeout until the user acts: install result broadcast (Install / cancel),
+            // or focus returning from the system installer to another app. Only STOP aborts.
+            while (!done.await(500, TimeUnit.MILLISECONDS)) {
+                if (stopped) return "{\"ok\":false,\"message\":\"Stopped by user\"}";
+                if (AgentSession.installerLeftMs() > 4000) return "{\"ok\":false,\"message\":\"Installation dialog closed by the user without installing (cancelled)\"}";
+            }
             return res[0];
-        } finally { unregisterReceiver(rcv); }
+        } finally { unregisterReceiver(rcv); AgentSession.setInstalling(false); AgentHudOverlay.setVisible(true); }
     }
 
+    /** Reply for begin_session: the only operational area the LLM sees (window-relative, 0,0 = top-left of the app window). */
+    private String sessionInfo(String p) throws Exception {
+        JSONObject o = new JSONObject(); o.put("ok", true); o.put("package", p == null ? JSONObject.NULL : p); o.put("fullDevice", p == null);
+        android.graphics.Rect b = null; for (int k = 0; k < 10 && (b = a11y().agentBounds()) == null; k++) { if (p == null) break; try { Thread.sleep(200); } catch (InterruptedException e) { break; } }
+        if (b != null) { o.put("width", b.width()); o.put("height", b.height()); } else o.put("window", "not visible yet - use android_launch_app");
+        return o.toString();
+    }
     private static String ok(boolean b) { return "{\"ok\":" + b + "}"; }
     private String dispatch(String t, JSONObject a) throws Exception {
         switch (t) {
+            case "begin_session": { String p = a.getString("package");
+                if (!ScopeGuard.isAllowed(this, p)) throw new SecurityException("Package not in scope: " + p);
+                AgentSession.begin(p); return sessionInfo(p); }
+            case "begin_full_device_session": {
+                if (!ScopeGuard.fullDevice(this)) throw new SecurityException("Full Device Mode is disabled in the Automator settings");
+                AgentSession.beginFull(); return sessionInfo(null); }
             case "dump_ui_tree": return a11y().dumpTree(a.optBoolean("compact", true));
             case "tap_node": return ok(a11y().tapNode(nodeId(a.has("id") ? a.get("id") : a.get("nodeId"))));
-            case "tap": case "tap_coordinates": { double sf = a.optDouble("scaleFactor", 1.0);
-                float x = (float) (a.getDouble("x") * sf), y = (float) (a.getDouble("y") * sf); return ok(a11y().windowGesture(x, y, x, y, 50)); }
-            case "swipe": { double sf = a.optDouble("scaleFactor", 1.0);
-                return ok(a11y().windowGesture((float)(a.getDouble("x1")*sf), (float)(a.getDouble("y1")*sf), (float)(a.getDouble("x2")*sf), (float)(a.getDouble("y2")*sf), a.optLong("durationMs", 300))); }
+            case "tap": case "tap_coordinates": { double sf = a.optDouble("scaleFactor", 1.0); if (!(sf > 0)) sf = 1.0;
+                float x = (float) (a.getDouble("x") / sf), y = (float) (a.getDouble("y") / sf); return ok(a11y().windowGesture(x, y, x, y, 50)); }
+            case "swipe": { double sf = a.optDouble("scaleFactor", 1.0); if (!(sf > 0)) sf = 1.0;
+                return ok(a11y().windowGesture((float)(a.getDouble("x1")/sf), (float)(a.getDouble("y1")/sf), (float)(a.getDouble("x2")/sf), (float)(a.getDouble("y2")/sf), a.optLong("durationMs", 300))); }
             case "input_text": return ok(a11y().inputText(a.has("id") ? nodeId(a.get("id")) : null, a.getString("text")));
             case "global_action": return ok(a11y().global(a.getString("action")));
             case "launch_app": { String p = a.getString("package");
                 if (!ScopeGuard.isAllowed(this, p)) throw new SecurityException("Package not in scope: " + p);
+                if (!AgentSession.isFull()) { // adopt the already open window when the descriptor matches
+                    if (p.equals(AgentSession.pkg()) && a11y().agentBounds() != null) return sessionInfo(p);
+                    AgentSession.begin(p); }
                 Intent i = getPackageManager().getLaunchIntentForPackage(p); if (i == null) throw new IllegalArgumentException("No launcher for " + p);
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 String q = a.optString("quarter", "");

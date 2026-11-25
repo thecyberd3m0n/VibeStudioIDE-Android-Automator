@@ -6,31 +6,23 @@ public class VibeAccessibilityService extends AccessibilityService {
     public static volatile VibeAccessibilityService instance;
     private final Map<String, AccessibilityNodeInfo> nodes = new HashMap<>();
     @Override public void onServiceConnected() { instance = this; }
-    @Override public void onAccessibilityEvent(AccessibilityEvent e) {}
+    @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        // only the package name of the focus change is looked at; no content is read while installing
+        if (AgentSession.installing() && e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.getPackageName() != null) AgentSession.onFocusPackage(e.getPackageName().toString());
+    }
     @Override public void onInterrupt() {}
     @Override public boolean onUnbind(android.content.Intent i) { instance = null; return super.onUnbind(i); }
-    /** Clicks the confirm button of the system package installer dialog; false if it is not on screen. */
-    public boolean clickInstallConfirm() {
-        android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
-        String pkg = String.valueOf(root.getPackageName());
-        if (!pkg.contains("packageinstaller") && !pkg.contains("permissioncontroller")) return false;
-        for (String label : new String[]{"Install", "Update", "Zainstaluj", "Aktualizuj", "Install anyway", "Zainstaluj mimo to"})
-            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText(label))
-                if (n.isClickable() && n.isEnabled() && n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return true;
-        return false;
-    }
-
-
     /** The one window the agent controls (bounds, UI tree and screenshot all use it): an allowed app window, never the Automator's own; the active one wins, else the focused one. */
     private AccessibilityWindowInfo agentWindow() {
         AccessibilityWindowInfo best = null;
+        if (AgentSession.installing()) return null; // installer on screen: never read it
         try {
             for (AccessibilityWindowInfo w : getWindows()) {
                 if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo r = w.getRoot(); if (r == null) continue;
                 CharSequence pkg = r.getPackageName();
                 if (pkg == null || pkg.toString().equals(getPackageName()) || !dev.vibestudio.automator.ipc.ScopeGuard.isAllowed(this, pkg.toString())) continue;
+                if (AgentSession.pkg() != null && !AgentSession.pkg().equals(pkg.toString())) continue; // session: only the declared app
                 if (best == null || w.isActive() || (w.isFocused() && !best.isActive())) best = w;
             }
         } catch (Throwable t) {}
@@ -51,8 +43,10 @@ public class VibeAccessibilityService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo agentRoot() {
+        if (AgentSession.installing()) return null;
         AccessibilityWindowInfo w = agentWindow(); AccessibilityNodeInfo r = w != null ? w.getRoot() : null;
         if (r != null) return r;
+        if (AgentSession.pkg() != null) return null; // never fall back to another app
         r = getRootInActiveWindow();
         return r != null && !getPackageName().contentEquals(String.valueOf(r.getPackageName())) ? r : null;
     }
@@ -98,11 +92,17 @@ public class VibeAccessibilityService extends AccessibilityService {
         Bundle b = new Bundle(); b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b);
     }
-    /** Gesture in window coordinates (same as screenshot and UI-tree bounds): the window origin is added here. */
+    /** The ONLY entry point for coordinates from the agent. The session window is a virtual
+     *  space: (0,0) is its top-left corner and (width-1,height-1) its bottom-right. Any point is
+     *  clamped into that space and only then shifted to the display, so a gesture can never
+     *  land outside the tested window. */
     public boolean windowGesture(float x1, float y1, float x2, float y2, long dur) {
-        Rect b = agentBounds(); float ox = b == null ? 0 : b.left, oy = b == null ? 0 : b.top;
-        return gesture(x1 + ox, y1 + oy, x2 + ox, y2 + oy, dur);
+        if (AgentSession.installing()) throw new IllegalStateException("INSTALL_IN_PROGRESS: waiting for the user to confirm the installation");
+        Rect b = agentBounds(); if (b == null) throw new IllegalStateException("NO_SESSION_WINDOW: the session app has no visible window");
+        float mx = Math.max(0, b.width() - 1), my = Math.max(0, b.height() - 1);
+        return gesture(b.left + clamp(x1, mx), b.top + clamp(y1, my), b.left + clamp(x2, mx), b.top + clamp(y2, my), dur);
     }
+    private static float clamp(float v, float max) { return Float.isNaN(v) ? 0 : Math.min(Math.max(v, 0), max); }
     public boolean gesture(float x1, float y1, float x2, float y2, long dur) {
         dev.vibestudio.automator.hud.BubbleOverlay.setPassThrough(true);
         try { return gesture0(x1, y1, x2, y2, dur); } finally { dev.vibestudio.automator.hud.BubbleOverlay.setPassThrough(false); }
@@ -131,6 +131,7 @@ public class VibeAccessibilityService extends AccessibilityService {
     /** Screenshot of the agent's app window only (no HUD frame, no bubble). Android 14+ (takeScreenshotOfWindow, called via reflection). */
     /** Screenshot of the agent's app window only (no HUD frame, no bubble). Android 14+ (takeScreenshotOfWindow, called via reflection). */
     public String screenshot() throws Exception {
+        if (AgentSession.installing()) throw new IllegalStateException("INSTALL_IN_PROGRESS: screen is not readable during installation");
         if (Build.VERSION.SDK_INT < 34) throw new UnsupportedOperationException("screenshot needs Android 14+");
         AccessibilityWindowInfo aw = agentWindow(); int wid = aw == null ? -1 : aw.getId();
         if (wid == -1) throw new IllegalStateException("No allowed app window to capture");
