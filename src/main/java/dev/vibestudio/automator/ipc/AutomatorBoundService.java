@@ -164,8 +164,13 @@ public class AutomatorBoundService extends Service {
                     AgentSession.begin(p); }
                 Intent i = getPackageManager().getLaunchIntentForPackage(p); if (i == null) throw new IllegalArgumentException("No launcher for " + p);
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                // Floating window is the DEFAULT. Standard (full-screen) mode only when the caller explicitly sets "standard_window": true,
+                // or when freeform is not supported on this device.
+                boolean standard = a.optBoolean("standard_window", false);
                 String q = a.optString("quarter", "");
-                if (q.isEmpty()) { startActivity(i); return ok(true); }
+                if (standard || !dev.vibestudio.automator.driver.FreeformStatus.isOn()) { startActivity(i); return ok(true); }
+                if (q.isEmpty()) q = "top_right";
+
                 android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
                 int w = dm.widthPixels, h = dm.heightPixels, hw = w / 2, hh = h / 2;
                 android.graphics.Rect r;
